@@ -1,0 +1,202 @@
+#!/bin/sh
+
+#
+# Developed by Ig.
+#
+# Please report bugs to kde@aynoa.net
+#
+
+
+#
+# Control variables.
+#
+CLIPBOARD=Yes
+KANACONVERSION=Yes
+POPUP=Yes
+STDIN=No
+TESTKAKASI=No
+XSEL=No
+
+
+#
+# Help function.
+#
+function Help() {
+
+  SCRIPTNAME=`basename $0`
+  echo "$SCRIPTNAME v1.0, Kanji to Kana conversion.
+
+Usage: $SCRIPTNAME -h | [-c] [-p] < -- | -x | text... >
+
+    -h | --help         -- Displays this help.
+    -c | --noclipboard  -- Don't copy result to clipboard.
+    -k | --kana         -- Kana conversion (default).
+    -p | --nopopup      -- Don't popup result.
+    -r | --romaji       -- Rōmaji conversion.
+    -t | --testkakasi   -- Test if kakasi conversion works.
+    -x | --xsel         -- Captures selected text from X Windows using 'xsel' utility.
+    --                  -- Reads text from stdin.
+
+Examples:
+    $SCRIPTNAME --
+    $SCRIPTNAME -x
+    $SCRIPTNAME \"日本語\"
+
+Remarks:
+  Text conversion predence is: stdin, --xsel and command parameters.
+  kakasi must be installed.
+"
+
+}
+
+
+#
+# Display results.
+#
+function Display() {
+
+  echo -e "$2"
+  if [ "$POPUP" == "Yes" ]; then
+    OUTTEXT=`echo -e "Kanji:\n$1\n\nKana:\n$2"`
+    kdialog --title "Kanji to Kana" --passivepopup "$OUTTEXT"
+  fi
+  if [ "$CLIPBOARD" = "Yes" ]; then
+    qdbus org.kde.klipper /klipper setClipboardContents "$2" > /dev/null
+  fi
+
+}
+
+
+#
+# Parse parameters.
+#
+if [ "$#" == "0" ]; then
+    Help
+    exit 1
+fi
+
+while [ -n "$1" ]; do
+
+  case "$1" in
+
+    -c|--noclipboard)
+      CLIPBOARD=No
+      ;;
+
+    -h|--help)
+      Help
+      exit 1
+      ;;
+
+    -k|--kana)
+      KANACONVERSION=Yes
+      ;;
+
+    -p|--nopopup)
+      POPUP=No
+      ;;
+
+    -r|--romaji)
+      KANACONVERSION=No
+      ;;
+
+    -t|--testkakasi)
+      TESTKAKASI=Yes
+      ;;
+
+    -x|--xsel)
+      XSEL=Yes
+      ;;
+
+    --)
+      STDIN=Yes
+      ;;
+
+    *)
+      if [ -z "$TEXT" ]; then
+        TEXT=`echo -e "$1"`
+      else
+        TEXT=`echo -e "$TEXT|,|$1"`
+      fi
+      ;;
+
+  esac
+
+  shift
+done
+
+
+#
+# Kakasi test.
+#
+if [ "$TESTKAKASI" == "Yes" ]; then
+  TEXT="撮って"
+  CONVERSION="撮って[とって]"
+  RESULT=`echo "$TEXT" | iconv --to-code=EUC-JP | kakasi -Ja -f -w | iconv --from-code=EUC-JP`
+  MESSAGE="\n\tReference text\t: $TEXT\n\tResult expected\t: $CONVERSION\n\tResult obtained\t: $RESULT"
+  if [ "$RESULT" == "$CONVERSION" ]; then
+    echo -e "Kakasi conversion test passed:$MESSAGE\n"
+    exit 0
+  else
+    echo -e "ERROR: Kakasi conversion test failed:$MESSAGE\n"
+    exit 1
+  fi
+fi
+
+
+#
+# stdin takes precedence.
+#
+if [ "$STDIN" == "Yes" ]; then
+
+  while read text; do
+    if [ "$KANACONVERSION" = "Yes" ]; then
+      RESULT=`echo "$text" | iconv --to-code=EUC-JP | kakasi -ieuc -JH -p -s | iconv --from-code=EUC-JP`
+    else
+      RESULT=`echo "$text" | iconv --to-code=EUC-JP | kakasi -ieuc -Ea -Ka -Ha -Ja -p -s`
+    fi
+    Display "$text" "$RESULT"
+  done
+
+else
+
+  #
+  # If xsel enabled current X selection takes precedence over parameters.
+  #
+  if [ "$XSEL" == "Yes" ]; then
+    TEXT=`xsel -p -o`
+  fi
+
+  IFS=$(echo -en "\n\b")
+  for text in $TEXT; do
+
+    if [ -z "$text" ]; then
+      continue
+    fi
+
+    if [ -f "$text" ]; then
+
+      if [ "$KANACONVERSION" = "Yes" ]; then
+        RESULT=`cat "$text" | iconv --to-code=EUC-JP | kakasi -ieuc -JH -p -s | iconv --from-code=EUC-JP
+      else
+        RESULT=`cat "$text" | iconv --to-code=EUC-JP | kakasi -ieuc -Ea -Ka -Ha -Ja -p -s
+      fi
+
+    else
+
+      if [ "$KANACONVERSION" = "Yes" ]; then
+        RESULT=`echo "$text" | iconv --to-code=EUC-JP | kakasi -ieuc -JH -p -s | iconv --from-code=EUC-JP`
+      else
+        RESULT=`echo "$text" | iconv --to-code=EUC-JP | kakasi -ieuc -Ea -Ka -Ha -Ja -p -s`
+      fi
+
+    fi
+
+    Display "$text" "$RESULT"
+
+  done
+  unset IFS
+
+fi
+
+exit 0

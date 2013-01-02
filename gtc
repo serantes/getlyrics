@@ -1,0 +1,343 @@
+#! /bin/sh
+
+#
+# Name:   Cli Google Translate v2.0
+# Author: Ignacio Serantes (development@aynoa.net)
+#
+# Changelog:
+#
+#   2012/10/01 -- 2.0 version.
+#   2010/11/17 -- 1.0 version.
+#
+# Comments:
+#
+#   Please report bugs to development@aynoa.net
+#
+
+
+#
+# Main variables.
+#
+CLIPBOARD=No
+DOTEST=No
+SLANG='auto'
+DLANG=${LANG:0:2}
+POPUP=No
+SCRIPTNAME=`basename $0`
+STDIN=No
+XSEL=No
+
+
+#
+# Help function.
+#
+function Help() {
+
+  echo "$SCRIPTNAME v2.0, Google Translate Cli.
+
+Usage: $SCRIPTNAME [-l] | [-t] | [-c] [-d lang] [-p] [-s lang] < -- | -x | text... >
+
+    -h | --help         -- Displays this help.
+    -c | --clipboard    -- Copy result to clipboard.
+    -d | --destination  -- Destination code language, default is user locale.
+    -p | --popup        -- Popups result.
+    -s | --source       -- Source code language, default is autodetection.
+    -t | --test         -- Test if all additional software are available.
+    -x | --xsel         -- Captures selected text from X Windows using 'xsel' utility.
+    --                  -- Reads text from stdin.
+
+Examples:
+    $SCRIPTNAME -x
+    $SCRIPTNAME -d es \"Hi\" \"How are you?\"
+    echo \"The power of the pipes...\" | $SCRIPTNAME -d es --
+
+Remarks:
+  Translation url: \"http://ajax.googleapis.com/ajax/services/language/translate\".
+  Language list url: \"http://code.google.com/apis/language/translate/v1/reference.html\".
+  Changes in Google Translate service could cause this script fails.
+  This script capabilities are limited by Google Translate service limitations.
+  Text translation predence is: stdin, --xsel and command parameters.
+  curl, sed, xsel, recode, qdbus and kdialog are required.
+"
+#    -l | --languages    -- Lists all available languages and codes.
+
+} # Help()
+
+
+#
+# Test if all additional software are available.
+#
+function Test() {
+
+  echo "Testing if \"$SCRIPTNAME\" is functional..."
+  ERROR=No
+  TEST=`curl --help` > /dev/null 2> /dev/null
+  if [ -z "$TEST" ]; then
+    echo "ERROR: \"curl\" is not installed so \"$SCRIPTNAME\" can't use Google Translate service."
+    ERROR=Yes
+  fi
+
+  TEST=`sed --help` > /dev/null 2> /dev/null
+  if [ -z "$TEST" ]; then
+    echo "ERROR: \"sed\" is not installed so \"$SCRIPTNAME\" don't works at all."
+    ERROR=Yes
+  fi
+
+  TEST=`xsel --help` > /dev/null 2> /dev/null
+  if [ -z "$TEST" ]; then
+    echo "ERROR: \"xsel\" is not installed so \"$SCRIPTNAME\" can't capture X Windows selection."
+    ERROR=Yes
+  fi
+
+  TEST=`recode` > /dev/null 2> /dev/null
+  if [ -z "$TEST" ]; then
+    echo "ERROR: \"recode\" is not installed so \"$SCRIPTNAME\" can't convert htmlentities."
+    ERROR=Yes
+  fi
+
+  TEST=`qdbus --help` > /dev/null 2> /dev/null
+  if [ -z "$TEST" ]; then
+    echo "ERROR: \"qdbus\" is not installed so \"$SCRIPTNAME\" can't send data to Klipper."
+    ERROR=Yes
+  fi
+
+  TEST=`kdialog --help` > /dev/null 2> /dev/null
+  if [ -z "$TEST" ]; then
+    echo "ERROR: \"kdialog\" is not installed so \"$SCRIPTNAME\" can't display data in a popup."
+    ERROR=Yes
+  fi
+
+  if [ "$ERROR" == "Yes" ]; then
+    echo "ERROR: $SCRIPTNAME probably don't works."
+    exit 1
+  else
+    echo "OK: All tests passed so $SCRIPTNAME is totally functional."
+    exit 0
+  fi
+
+} # Test()
+
+#
+# Displays all languages and language codes supported.
+#
+function LanguageList() {
+
+  echo 'Supported languages (language, code):'
+  curl -s -g -4 "http://code.google.com/apis/language/translate/v1/reference.html" | sed -n '/google.language.Languages = {/,/}/p' | sed -e '1,1d' -e '$d' -e 's/[,]//' -e 's/ : /\t/'
+  exit 0
+
+} # LanguageList()
+
+
+#
+# Display results.
+#
+function Display() {
+
+  echo -e "$2"
+  if [ "$POPUP" == "Yes" ]; then
+    OUTTEXT=`echo -e "Translation:\n$2"`
+    kdialog --title "Google Translate Cli" --passivepopup "$OUTTEXT"
+  fi
+  if [ "$CLIPBOARD" = "Yes" ]; then
+    qdbus org.kde.klipper /klipper setClipboardContents "$2" > /dev/null
+  fi
+
+} # Display()
+
+
+#
+# Translate text.
+#
+function GoogleTranslate() {
+
+  RESULT=$(curl -s -i --user-agent "" -d "sl=$2" -d "tl=$3" --data-urlencode "text=$1" http://translate.google.com)
+  ENCODING=$(awk '/Content-Type: .* charset=/ {sub(/^.*charset=["'\'']?/,""); sub(/[ "'\''].*$/,""); print}' <<< "$RESULT")
+  RESULT=$(iconv -f $ENCODING <<< "$RESULT" |  awk 'BEGIN {RS="</div>"};/<span[^>]* id=["'\'']?result_box["'\'']?/')
+  echo "$RESULT"
+
+}
+
+
+#
+# Converts html entities.
+#
+function ProcessHTMLEntities() {
+
+  #
+  # Explanation:
+  #
+  # Teoretically with next line of code all is done:
+  #printf "`echo -e "$1" | sed -e 's/\\\u00/\\\x/g'`" | sed -e 's/<br \/>/\n/g' | sed 's/<[^>]*>//g' | recode HTML
+  echo -e "$1" | sed -e 's/\\\u00/\\\x/g' | sed -e 's/<br \/>/\n/g' | sed 's/<[^>]*>//g' | recode -d UTF8..HTML | recode HTML
+
+  #
+  # but sadly recode HTML brokes encoding for not ASCII characters so I need to do the
+  # next as workaround :(. A more elegant solution are welcome.
+  #
+
+  #RESULT=`echo -e "$1" | sed -e 's/\\\u00/\\\x/g'`
+  #RESULT=`printf "$RESULT"`
+
+  # Extract all htmltags from the text.
+  #ALLTAGS=''
+  #IFS=' '
+  #for char in $RESULT; do
+
+  #  if [ -n "$char" ]; then
+
+  #    TAG=`echo "$char" | sed -n 's/.*&\(.*\);.*/\1/p'`
+  #    if [ -n "$TAG" ]; then
+  #      TAG="&$TAG;"
+  #      ALLTAGS="$ALLTAGS$TAG\n"
+  #    fi
+
+  #fi # [ -n "$char" ]
+
+  #done # char in $RESULT
+
+  # Avoid duplicates and do html tags substitution.
+  #TAGS=`echo -e "$ALLTAGS" | uniq`
+  #IFS='\n'
+  #for char in $TAGS; do
+
+  #  if [ -n $char ]; then
+  #    value=`echo "$char" | recode HTML`
+  #    RESULT=`echo "$RESULT" | sed -e "s/$char/$value/g"`
+  #  fi
+
+  #done # char in $TAGS
+
+  #unset IFS
+
+  # Converts <br \> to \n and remove html tags.
+  #echo "$RESULT" | sed -e 's/<br \/>/\n/g' | sed 's/<[^>]*>//g'
+
+} # ProcessHTMLEntities()
+
+
+#
+# Parse parameters.
+#
+if [ "$#" == "0" ]; then
+   Help
+   exit 1
+fi
+
+while [ -n "$1" ]; do
+
+  case "$1" in
+
+    -c|--clipboard)
+      CLIPBOARD=Yes
+      ;;
+
+    -d|--destination)
+      shift
+      DLANG="$1"
+      ;;
+
+    #-l|--languages)
+    #  LanguageList
+    #  ;;
+
+    -h|--help)
+      Help
+      exit 1
+      ;;
+
+    -p|--popup)
+      POPUP=Yes
+      ;;
+
+    -s|--source)
+      shift
+      SLANG="$1"
+      ;;
+
+    -t|--test)
+      DOTEST=Yes
+      ;;
+
+    -x|--xsel)
+      XSEL=Yes
+      ;;
+
+    --)
+      STDIN=Yes
+      ;;
+
+    *)
+      if [ -z "$TEXT" ]; then
+        TEXT=$(echo -e "$1")
+      else
+        TEXT=$(echo -e "$TEXT\n\b$1")
+      fi
+      ;;
+
+  esac # "$1"
+
+  shift
+
+done # while [ -n "$1" ]
+
+
+if [ "$DOTEST" == "Yes" ]; then
+  Test
+fi
+
+
+#LANGPAIR="$SLANG|$DLANG"
+
+#
+# stdin takes precedence.
+#
+if [ "$STDIN" == "Yes" ]; then
+
+  while read text; do
+
+    text=`echo -e "$text" | sed -e :a -e N -e 's/\n/<br \/>/' -e ta`
+    RESULT=$(GoogleTranslate "$text" "$SLANG" "$DLANG")
+    RESULT=$(ProcessHTMLEntities "$RESULT")
+#    if [ -z "$SLANG" ]; then
+
+#      RESULT=`curl -s -g -4 --data-urlencode "q=$text" --data-urlencode "v=1.0" --data-urlencode "langpair=$LANGPAIR"  "http://ajax.googleapis.com/ajax/services/language/translate" | sed -n 's/.*translatedText\":\"\(.*\)\",\"detectedSourceLanguage.*$/\1\n/p'`
+
+#    else # [ -z "$SLANG" ]
+
+#      RESULT=`curl -s -g -4 --data-urlencode "q=$text" --data-urlencode "v=1.0" --data-urlencode "langpair=$LANGPAIR" "http://ajax.googleapis.com/ajax/services/language/translate" | sed -n 's/.*translatedText\":\"\(.*\)\"},\s"responseDetails.*$/\1\n/p'`
+
+#    fi # [ -z "$SLANG" ]
+
+    Display "$text" "$RESULT"
+
+  done # while read text
+
+else # [ "$STDIN" == "Yes" ]
+
+  #
+  # If xsel enabled current X selection takes precedence over parameters.
+  #
+  if [ "$XSEL" = "Yes" ]; then
+    TEXT=`xsel -p -o`
+  fi
+
+  IFS=$(echo -en "\n\b")
+  for text in $TEXT; do
+
+    if [ -z "$text" ]; then
+      continue
+    fi
+
+    text=$(echo -e "$text" | sed -e :a -e N -e 's/\n/<br \/>/' -e ta)
+    RESULT=$(GoogleTranslate "$text" "$SLANG" "$DLANG")
+    RESULT=$(ProcessHTMLEntities "$RESULT")
+
+    Display "$text" "$RESULT"
+
+  done #　for text in $TEXT
+  unset IFS
+
+fi # [ "$STDIN" == "Yes" ];
+
+exit 0
