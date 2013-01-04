@@ -374,12 +374,12 @@ if (options.cache == None):
 else:
     cacheDir = options.cache
 
-    
+
 if (options.list != None):
     witchList = options.list.lower()
     if (witchList == ""):
         witchList = "engines"
-    
+
     if (witchList == "engines"):
         print "Available engines:"
         i = 0
@@ -397,8 +397,8 @@ if (options.list != None):
         print "ERROR: \"%s\" is an unknown list type." % witchList
 
     sys.exit(0)
-    
-    
+
+
 if options.searchInCache:
     searchTerm = searchTermHuman = ""
     if (title != None):
@@ -669,11 +669,11 @@ else:
         toSearch = []
         if (options.forcedEngines == None):
             enginesToUse = []
-            
+
         else:
             enginesToUse = options.forcedEngines.strip().replace(" ", "").split(",")
 
-          
+
         for engine in ENGINES:
             if ((enginesToUse != []) and not (engine[0] in enginesToUse)):
                 continue
