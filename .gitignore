@@ -1,4 +1,6 @@
 *.py[cod]
+*~
+.*
 
 # C extensions
 *.so
@@ -33,3 +35,8 @@ nosetests.xml
 .mr.developer.cfg
 .project
 .pydevproject
+/getlyrics.kdev4
+/engines/futuribles/*
+/engines/tests/*
+/engines/common.py
+/.kdev4/getlyrics.kdev4
